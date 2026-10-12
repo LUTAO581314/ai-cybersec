@@ -40,8 +40,11 @@ accounts, and scope boundaries (e.g. "no auth-endpoint fuzzing").
 - **Payloads/cheatsheets**: `C:\Users\LT\Desktop\Workspace\bb-repos\PayloadsAllTheThings\` — payload and exploit references by vuln class.
 - **Nuclei**: binary at `C:\Users\LT\Desktop\Workspace\bugbounty-mcp\bin\nuclei.exe`, templates at `C:\Users\LT\Desktop\Workspace\bb-repos\nuclei-templates\` (14k+). Scan results land in `C:\Users\LT\Desktop\Workspace\bugbounty-mcp\loot\` (JSONL + txt per run).
 - **平台知识库** (`C:\Users\LT\Desktop\Workspace\bugbounty-mcp\kb\`):
-  - `butian-submission-template.md` — 补天官方提交模板(字段+自查清单,公告 543)
-  - `butian-faq.md` — 补天平台规则(审核流程/奖励/信誉分/数量限制,FAQ)
+  - `butian-submission-template.md` — 补天官方提交模板(字段+自查清单,公告543)
+  - `butian-faq.md` — 补天平台规则(审核流程/奖励/信誉分/数量限制/活动中心)
+  - `butian-plan.md` — **收录细则+定价表**(Web/IoT/App/工控/系统软件;降级与不收录规则;不关注厂商名单)
+  - `butian-role.md` — 白帽行为规范(自动化测试的行为边界:不跳板/不DoS/证明即停)
+  - `butian-newneed.md` — 漏洞状态全流程/积分/称号/团队
 - **Wordlists** (`C:\Users\LT\Desktop\Workspace\bb-repos\SecLists\Discovery\`):
   - Subdomains: `DNS/subdomains-top1million-20000.txt`, `DNS/bitquark-subdomains-top100000.txt`, `DNS/dns-Jhaddix.txt`
   - Directories: `Web-Content/common.txt`, `Web-Content/raft-medium-words.txt`, `Web-Content/raft-large-words.txt`, `Web-Content/big.txt`
@@ -53,6 +56,11 @@ Probe progressively — passive/recon first, then light active, escalating only
 as authorized.
 
 1. **Confirm authorization** (Section 0). Record the target, scope, and program.
+   - **补天目标筛选**: 对照 `kb/butian-plan.md` 的「不关注的系统和漏洞」名单先排除;
+     IP 漏洞暂不收;CORS 错误/self-xss/前台弱口令/URL跳转 不报;
+     同系统同类型最多报 3 个;SQLi 同接口多参数算一处。
+   - 测试行为遵守 `kb/butian-role.md`: 限速扫描、RCE 证明后立刻停(whoami 即可)、
+     不拉数据、不跳板、不 DoS、不动业务数据、不留 webshell。
 2. **Quick recon**: `bb_target_analyse("target.com")` for an overview.
 3. **DNS & subdomains**: `bb_resolve`, then `bb_subdomains("target.com")`.
    Optional deeper pass with the big SecLists wordlist by extending the server
