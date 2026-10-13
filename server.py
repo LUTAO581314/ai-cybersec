@@ -104,6 +104,73 @@ def bb_nuclei(
     return bb.nuclei_scan(target, templates, tags, severity, threads, timeout, extra_args)
 
 
+@mcp.tool()
+def bb_vendors(limit: int = 50, page: int = 1) -> str:
+    """List Butian dedicated-SRC vendors (项目大厅): name, bounty range, recommend flag, update time.
+
+    limit: page size 1-200 (default 50). page: page number (default 1).
+    Use the returned company names/scopes to pick your main hunting grounds.
+    """
+    return bb.butian_vendors(limit, page)
+
+
+@mcp.tool()
+def bb_activities(status: str = "ongoing", limit: int = 10, with_details: bool = True) -> str:
+    """List Butian activities (活动中心) with full rules text.
+
+    status: 'ongoing' (进行中, default) or 'all'. limit: max to show (default 10).
+    with_details: fetch each activity's description + rules (default true).
+    Join an activity in the browser, then check its name when submitting a vuln.
+    """
+    return bb.butian_activities(status, limit, with_details)
+
+
+@mcp.tool()
+def bb_report(
+    title: str,
+    url: str,
+    vtype: str,
+    level: str,
+    detail: str,
+    fix: str,
+    method: str = "",
+    post_data: str = "",
+    param_name: str = "",
+    poc: str = "",
+    vendor: str = "",
+    scope: str = "",
+    weight: str = "",
+    test_account: str = "",
+    activity: str = "",
+    outdir: str = "",
+) -> str:
+    """Generate a Butian-compliant vulnerability submission report (Markdown, paste-ready).
+
+    title: e.g. "XX网站存在SQL注入漏洞"
+    url: vulnerable URL (GET injection: full URL with params)
+    vtype: 漏洞类型 (SQL注入/XSS/命令执行/越权/...)
+    level: 低危 | 中危 | 高危
+    detail: 功能点+到达步骤+利用过程 (core narrative)
+    fix: concrete remediation advice
+    method: GET | POST (POST needs post_data + param_name per the official 三处 rule)
+    post_data: full HTTP request packet (POST only)
+    param_name: injected parameter name (POST only)
+    poc: POC/payload (rendered in a code block as required)
+    vendor/scope: dedicated-SRC vendor name + test scope (empty for 公益SRC)
+    weight: 补天权重 for 公益SRC (">=1" or "0") — wrong choice gets rejected
+    test_account: test credentials if login required
+    activity: activity/task name to check at submission
+    outdir: output dir (default <project>/reports)
+    Returns the file path + a pre-submission warning list.
+    """
+    return bb.butian_report(
+        title=title, url=url, vtype=vtype, level=level, detail=detail, fix=fix,
+        method=method, post_data=post_data, param_name=param_name, poc=poc,
+        vendor=vendor, scope=scope, weight=weight, test_account=test_account,
+        activity=activity, outdir=outdir,
+    )
+
+
 def main() -> None:
     asyncio.run(mcp.run_stdio_async())
 

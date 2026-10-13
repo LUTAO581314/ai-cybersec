@@ -623,3 +623,272 @@ def nuclei_scan(
         f"Full run log: {txt_out}\n--- tail ---\n{out[-1500:]}"
     )
 
+
+# ---------------------------------------------------------------------------
+# Butian (补天) platform: task/vendor discovery + submission report generator
+# ---------------------------------------------------------------------------
+# Reverse-engineered from the site's Vue bundles (2026-10):
+#   POST /Reward/corps    {"page":N,"size":M}  -> dedicated SRC vendor list
+#   POST /Active/center   {}                   -> all activities (total+list)
+#   GET  /Active/detail?id=X                   -> full activity rules text
+# The API needs a session cookie (warm up with a GET of the page) plus
+# XHR/Referer headers; a bare POST is rate-limited ("换个姿势，再来一次").
+
+BUTIAN_BASE = "https://www.butian.net"
+
+
+def _butian_json(path: str, payload: dict, referer: str, tries: int = 3) -> dict:
+    """POST to a butian XHR endpoint with session warm-up and polite retry."""
+    referer_url = referer if referer.startswith("http") else BUTIAN_BASE + referer
+    last: dict = {}
+    with httpx.Client(
+        headers={
+            "User-Agent": HEADERS["User-Agent"],
+            "Referer": referer_url,
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "application/json, text/plain, */*",
+        },
+        timeout=25.0,
+        follow_redirects=True,
+    ) as client:
+        try:
+            client.get(referer_url)
+        except Exception:
+            pass
+        for attempt in range(tries):
+            try:
+                last = client.post(BUTIAN_BASE + path, json=payload).json()
+            except Exception as e:
+                last = {"status": 0, "info": f"request failed: {e}"}
+            if last.get("status") == 1:
+                return last
+            if "换个姿势" not in (last.get("info") or ""):
+                return last
+            time.sleep(2.0 + attempt * 2.0)
+    return last
+
+
+def butian_vendors(limit: int = 50, page: int = 1) -> str:
+    """List Butian dedicated-SRC vendors (项目大厅): name, bounty range, status.
+
+    limit: page size 1-200 (default 50). page: page number (default 1).
+    Returns one line per vendor with company_id, name, reward range (RMB),
+    recommended flag and last update time.
+    """
+    j = _butian_json("/Reward/corps", {"page": max(1, page), "size": max(1, min(limit, 200))}, "/Reward/plan/2")
+    if j.get("status") != 1:
+        return f"butian /Reward/corps failed: {j.get('info')} (status={j.get('status')})"
+    data = j.get("data") or {}
+    lst = data.get("list") or []
+    if not lst:
+        return f"No vendors returned (page={page}). Try another page."
+    out = [f"但天项目大厅 专属SRC厂商  page={page} got={len(lst)}\n" + "-" * 60]
+    for v in lst:
+        reward = f"{v.get('min_reward','?')}~{v.get('max_reward','?')}元"
+        flag = " [推荐]" if str(v.get("recommend")) == "1" else ""
+        out.append(
+            f"- id={v.get('company_id')}  {v.get('company_name')}  奖金:{reward}{flag}"
+            f"  更新:{v.get('change_time','?')[:10]}"
+        )
+    intro = [v for v in lst if v.get("introduce")]
+    if intro:
+        out.append("\n厂商简介(前3):")
+        for v in intro[:3]:
+            out.append(f"  {v.get('company_name')}: {str(v.get('introduce'))[:80]}")
+    out.append(
+        "\n下一步: 用 bb_target_analyse / bb_subdomains 对厂商范围内的域名开测; "
+        "提交时用 bb_report 生成补天格式报告。"
+    )
+    return "\n".join(out)
+
+
+def butian_activities(status: str = "ongoing", limit: int = 10, with_details: bool = True) -> str:
+    """List Butian activities (活动中心).
+
+    status: 'ongoing' (进行中, default) | 'all'.
+    limit: max activities to show (default 10).
+    with_details: fetch full rules text (description+detail) per shown activity.
+    """
+    j = _butian_json("/Active/center", {}, "/Active/center")
+    if j.get("status") != 1:
+        return f"butian /Active/center failed: {j.get('info')} (status={j.get('status')})"
+    lst = (j.get("data") or {}).get("list") or []
+    total = (j.get("data") or {}).get("total", "?")
+    if status != "all":
+        lst = [a for a in lst if a.get("status") == "进行中"]
+    lst = lst[: max(1, limit)]
+    if not lst:
+        return f"No {('ongoing' if status != 'all' else '')} activities (total on site: {total})."
+    out = [f"但天活动中心  显示={len(lst)}  站内总数={total}\n" + "-" * 60]
+    for a in lst:
+        out.append(
+            f"[id={a.get('id')}] {a.get('title')}\n"
+            f"    类型: {a.get('type')}  标签: {a.get('tags')}\n"
+            f"    时间: {a.get('start')} ~ {a.get('end')}  状态: {a.get('status')}"
+        )
+        if with_details:
+            try:
+                d = httpx.get(
+                    BUTIAN_BASE + "/Active/detail",
+                    params={"id": a.get("id")},
+                    headers={
+                        "User-Agent": HEADERS["User-Agent"],
+                        "Referer": BUTIAN_BASE + "/Active/center",
+                        "X-Requested-With": "XMLHttpRequest",
+                    },
+                    timeout=20.0,
+                ).json()
+                dd = d.get("data") or {}
+                if dd.get("description"):
+                    out.append(f"    说明: {dd['description']}")
+                det = (dd.get("detail") or "").strip()
+                if det:
+                    out.append("    规则:\n" + "\n".join("      " + line for line in det.splitlines()[:25]))
+            except Exception as e:
+                out.append(f"    (detail fetch failed: {e})")
+    out.append(
+        "\n下一步: 报名活动(浏览器点报名)后, 提交漏洞时勾选对应活动名, "
+        "活动奖励是额外叠加的, 不影响漏洞本身奖金。"
+    )
+    return "\n".join(out)
+
+
+def butian_report(
+    title: str,
+    url: str,
+    vtype: str,
+    level: str,
+    detail: str,
+    fix: str,
+    method: str = "",
+    post_data: str = "",
+    param_name: str = "",
+    poc: str = "",
+    vendor: str = "",
+    scope: str = "",
+    weight: str = "",
+    test_account: str = "",
+    activity: str = "",
+    outdir: str = "",
+) -> str:
+    """Generate a Butian-compliant submission report draft (Markdown, paste-ready).
+
+    Follows the official template (kb/butian-submission-template.md).
+    title: e.g. "XX网站存在SQL注入漏洞"
+    url: vulnerable URL (GET injection: full URL with params)
+    vtype: 漏洞类型 (SQL注入/XSS/命令执行/越权/...)
+    level: 低危 | 中危 | 高危
+    detail: 功能点+到达步骤+利用过程 (the core narrative)
+    fix: concrete remediation advice
+    method: GET | POST (POST requires post_data + param_name: the official "三处" rule)
+    post_data: full HTTP request packet (POST only)
+    param_name: injected parameter name (POST only)
+    poc: POC / payload (rendered in a code block, as required)
+    vendor / scope: dedicated-SRC vendor name and test scope (empty for 公益SRC)
+    weight: 补天权重 for 公益SRC (">=1" or "0"); 选错会驳回
+    test_account: test credentials if login is required
+    activity: activity/task name to check at submission (empty = no extra reward)
+    outdir: output dir (default: <project>/reports)
+    """
+    out_dir = outdir or os.path.join(_PKG_ROOT, "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    slug = re.sub(r"[^\w\u4e00-\u9fff]+", "-", title)[:40].strip("-") or "vuln"
+    path = os.path.join(out_dir, f"{ts}_{slug}.md")
+
+    is_post = method.upper().startswith("POST") or ("POST " in post_data.upper())
+    is_dedicated = bool(vendor.strip())
+
+    warn: list[str] = []
+    if not url.strip().lower().startswith(("http://", "https://")):
+        url = "https://" + url.strip()
+        warn.append("URL 未带协议, 已自动补 https:// (请确认真实协议)")
+    if is_post:
+        if not post_data.strip():
+            warn.append("POST 漏洞缺「完整注入数据包」— 官方要求三处: 基本URL+数据包+参数名")
+        if not param_name.strip():
+            warn.append("POST 漏洞缺「注入参数名」")
+    if weight.strip() and not is_dedicated and weight.strip() not in (">=1", "0", "≥1"):
+        warn.append(f"权重取值「{weight}」不在 [>=1 / 0], 请核对爱站权重")
+    if not fix.strip():
+        warn.append("修复方案为空 — 官方要求具体方案, 不能敷衍")
+    if not poc.strip() and "poc" not in detail.lower():
+        warn.append("未提供 POC — 详情里必须把 POC 放代码块")
+
+    L: list[str] = []
+    L.append(f"# 补天漏洞提交报告 — {title}")
+    L.append("")
+    L.append(f"> 生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}  ")
+    L.append("> 按官方模板生成(kb/butian-submission-template.md), 各节内容直接复制进对应表单项。")
+    L.append("")
+    L.append("---")
+    L.append("")
+    L.append("## 表单项填写")
+    L.append("")
+    L.append(f"| 表单项 | 填写内容 |")
+    L.append(f"|--------|----------|")
+    if is_dedicated:
+        L.append(f"| 厂商名称 | {vendor} |")
+        L.append(f"| 测试范围 | {scope or '(填厂商域名/IP, 如 www.test.com)'} |")
+    else:
+        L.append(f"| 权重(公益必选) | {weight or '(按主域名爱站权重: 百度≥1或谷歌≥3 选 >=1, 否则 0)'} |")
+    L.append(f"| 漏洞类型 | {vtype} |")
+    L.append(f"| 漏洞等级 | {level} |")
+    if activity.strip():
+        L.append(f"| 活动/任务 | {activity} (提交时勾选) |")
+    else:
+        L.append(f"| 活动/任务 | (不勾选 = 不参与额外奖励) |")
+    L.append("")
+    L.append("### 漏洞URL")
+    L.append("")
+    if is_post:
+        L.append(f"1. 基本URL:\n```\n{url}\n```")
+        L.append(f"\n2. 完整注入数据包:\n```\n{post_data or '(粘贴完整 HTTP 请求包)'}\n```")
+        L.append(f"\n3. 注入参数:\n```\n{param_name or '(参数名)'}\n```")
+    else:
+        L.append(f"```\n{url}\n```")
+    L.append("")
+    L.append("### 漏洞详情 (粘贴到「漏洞详情」栏)")
+    L.append("")
+    L.append(detail.strip() if detail.strip() else "(功能点+到达步骤+利用过程)")
+    if poc.strip():
+        L.append("")
+        L.append("POC:")
+        L.append("```")
+        L.append(poc.strip())
+        L.append("```")
+    if test_account.strip():
+        L.append("")
+        L.append(f"测试账号: {test_account}")
+    L.append("")
+    L.append("### 修复方案")
+    L.append("")
+    L.append(fix.strip() if fix.strip() else "(具体修复建议)")
+    L.append("")
+    L.append("### 截图清单 (提交时上传)")
+    L.append("")
+    L.append("- [ ] 归属证明: 百度搜索目标站点结果截图")
+    L.append("- [ ] 首页截图: **必须含地址栏**")
+    L.append("- [ ] 漏洞证明截图: 能独立说明漏洞成立 (RCE 要 whoami 回显; 注入要数据回显)")
+    L.append("")
+    L.append("---")
+    L.append("")
+    L.append("## 提交前自查")
+    L.append("")
+    for w in warn:
+        L.append(f"- ⚠️ {w}")
+    L.append("- [ ] 确认已在浏览器登录补天, 进入 提交漏洞 页面")
+    L.append("- [ ] 公益SRC: 权重按爱站权重选对 (选错/漏选直接驳回)")
+    L.append("- [ ] 同系统同类型漏洞最多 3 个, 不要重复堆量")
+    L.append("- [ ] 提交后 7 天内关注认领通知; 专属SRC 平台 ~1 个工作日审核")
+    L.append("")
+    content = "\n".join(L)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    head = f"补天报告已生成: {path}\n"
+    if warn:
+        head += f"⚠️ {len(warn)} 个提醒:\n" + "\n".join(f"  - {w}" for w in warn) + "\n"
+    head += f"\n报告共 {len(content)} 字符, 直接打开文件按节复制进表单即可。"
+    return head
+

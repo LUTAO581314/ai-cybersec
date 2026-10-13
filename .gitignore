@@ -1,6 +1,7 @@
 .venv/
 bin/
 loot/
+reports/
 __pycache__/
 *.pyc
 *.pyo

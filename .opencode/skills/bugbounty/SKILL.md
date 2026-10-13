@@ -1,6 +1,6 @@
 ---
 name: bugbounty
-description: Drive the bugbounty MCP server for authorized bug-bounty recon and scanning (subdomains, ports, HTTP probing, tech fingerprinting, directory fuzzing, security-header checks). Use when the user asks to analyze a target, enumerate subdomains, scan ports, fuzz directories/endpoints, probe HTTP services, detect technologies, or check security headers for bug-bounty research. Include the authorization guardrail whenever a target is named.
+description: Drive the bugbounty MCP server for authorized bug-bounty recon and scanning (subdomains, ports, HTTP probing, tech fingerprinting, directory fuzzing, security-header checks) plus Butian (补天) task discovery and submission-report generation. Use when the user asks to analyze a target, enumerate subdomains, scan ports, fuzz directories/endpoints, probe HTTP services, detect technologies, check security headers, list Butian vendors/activities, or draft a Butian-formatted vulnerability report. Include the authorization guardrail whenever a target is named.
 ---
 
 # Bug Bounty Workflow (bugbounty-mcp)
@@ -34,6 +34,9 @@ accounts, and scope boundaries (e.g. "no auth-endpoint fuzzing").
 | `bb_headers_check(url)` | Passive check: security headers, CORS, cookies, sensitive files (.git, .env, backups) |
 | `bb_nuclei(target, templates, tags, severity, threads, timeout, extra_args)` | **Nuclei v3.11.1** template scan (14k local templates): vulns, exposures, CVEs, tech/WAF detection |
 | `bb_target_analyse(target, subdomains, ports)` | One-shot quick recon report (DNS + HTTP + ports + subdomains) |
+| `bb_vendors(limit, page)` | **补天项目大厅**: dedicated-SRC vendor list — name, bounty range (RMB), recommend flag, update time |
+| `bb_activities(status, limit, with_details)` | **补天活动中心**: ongoing/ended activities with full rules text (join → extra rewards) |
+| `bb_report(title, url, vtype, level, detail, fix, ...)` | **补天报告生成器**: Markdown draft in the official template format — POST 三处 rule, POC code block, screenshot checklist, self-check warnings |
 
 ## 2. Reference materials / wordlists (cloned locally)
 
@@ -54,6 +57,32 @@ accounts, and scope boundaries (e.g. "no auth-endpoint fuzzing").
 
 Probe progressively — passive/recon first, then light active, escalating only
 as authorized.
+
+### 3a. 补天 (Butian) end-to-end loop
+
+The user's money path is Butian (butian.net). Full loop:
+
+1. **Pick the battlefield** (do this first if no target is given):
+   - `bb_vendors(limit=50)` → list of dedicated-SRC vendors with bounty ranges.
+     Prefer vendors with high `max_reward` + `[推荐]` + recent `update time`.
+   - `bb_activities(status="ongoing")` → live campaigns (报名 in the browser, then
+     check the name when submitting — extra reward on top of the vuln bounty).
+   - Cross-check against `kb/butian-plan.md`: skip vendors/vuln types in the
+     「不关注的系统和漏洞」 list; IP vulns not accepted; same system+type ≤ 3.
+2. **Get the scope**: a vendor's test scope (domain/IP) is on the vendor's
+   项目详情 page (browser) — record it, then treat those hosts as the authorized
+   scope for Section 0.
+3. **Hunt**: run the recon ladder (step 2–7 below) against the in-scope hosts.
+4. **Verify + draft**: for each confirmed finding call `bb_report(...)` to emit a
+   Butian-compliant Markdown draft (it enforces the POST 三处 rule, POC code
+   block, weight check, screenshot checklist). The file lands in `reports/`.
+5. **Human confirm, then submit**: per `kb/butian-role.md` — AI-found vulns must
+   pass a human check of the POC screenshots before submission (repeated
+   unverified AI vulns can freeze the account). First-come-first-served → submit
+   fast once confirmed. Copy each section of the generated report into the
+   matching form field.
+
+### 3b. Recon ladder (for a confirmed in-scope target)
 
 1. **Confirm authorization** (Section 0). Record the target, scope, and program.
    - **补天目标筛选**: 对照 `kb/butian-plan.md` 的「不关注的系统和漏洞」名单先排除;
@@ -76,14 +105,13 @@ as authorized.
    widen. Nuclei sends more requests than the recon tools; keep `threads` low
    (10-25) on production targets and avoid it during maintenance windows.
 8. **Report**: for each finding give: URL, how to reproduce, severity
-   (info/low/medium/high/critical) via `bb_headers_check` output and manual
-   analysis. Only report verified issues; honor program disclosure policy.
-   - **补天(Butian)提交**: 报告必须按官方规范化模板组织,对照
-     `kb/butian-submission-template.md` 的「提交前自查清单」逐项打勾:
-     URL(带参)/POST 三要素/归属证明/首页截图含地址栏/漏洞证明/权重(爱站,
-     公益必选,选错驳回)/活动任务/详情(功能点+步骤+POC代码块+测试账号)/
-     修复方案。平台规则(审核时限、5个待审限制、重复按时间、信誉分)见
-     `kb/butian-faq.md`。先报先得 → 确认无误尽快提交。
+    (info/low/medium/high/critical) via `bb_headers_check` output and manual
+    analysis. Only report verified issues; honor program disclosure policy.
+    - **补天(Butian)提交**: 用 `bb_report(...)` 生成官方模板格式的 Markdown 草稿
+      (自动处理 POST 三处/POC 代码块/权重校验/截图清单/自查提醒), 落盘在
+      `reports/`。对照 `kb/butian-submission-template.md` 的「提交前自查清单」
+      逐项确认后, 按节复制进表单提交。平台规则(审核时限、5个待审限制、
+      重复按时间、信誉分)见 `kb/butian-faq.md`。先报先得 → 确认无误尽快提交。
 
 ## 4. Guardrails when driving the tools
 

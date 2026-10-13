@@ -37,6 +37,9 @@
 | `bb_headers_check` | 安全头/CORS/Cookie/敏感文件(.git/.env/备份) |
 | `bb_nuclei` | **Nuclei 模板扫描**(14k 模板;tags/severity/线程/超时可控;结果落盘 loot/) |
 | `bb_target_analyse` | 一键侦察报告(DNS+HTTP+端口+子域) |
+| `bb_vendors` | **补天项目大厅**:专属SRC厂商列表(名称/奖金范围/推荐/更新时间) |
+| `bb_activities` | **补天活动中心**:进行中/已结束活动 + 完整活动规则文本 |
+| `bb_report` | **补天报告生成器**:按官方模板生成 Markdown 草稿(POST三处/POC代码块/权重校验/截图清单/自查提醒) |
 
 ## 快速开始
 
@@ -61,9 +64,11 @@ powershell -ExecutionPolicy Bypass -File .\setup.ps1   # 装 venv/nuclei/模板/
 ## 工作流(skill 内置)
 
 ```
+[补天闭环] bb_vendors / bb_activities → 选定厂商+活动+范围
 授权确认 → bb_target_analyse → bb_subdomains → bb_port_scan
         → bb_http_probe / bb_dir_fuzz → bb_headers_check
-        → bb_nuclei → 按补天模板写报告(kb/butian-submission-template.md 自查清单)
+        → bb_nuclei → bb_report 生成补天模板报告(reports/)
+        → 人工核对POC截图 → 按节复制进表单提交
 ```
 
 ## 补天(Butian)知识库
