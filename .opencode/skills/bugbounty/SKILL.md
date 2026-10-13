@@ -34,7 +34,7 @@ accounts, and scope boundaries (e.g. "no auth-endpoint fuzzing").
 | `bb_headers_check(url)` | Passive check: security headers, CORS, cookies, sensitive files (.git, .env, backups) |
 | `bb_nuclei(target, templates, tags, severity, threads, timeout, extra_args)` | **Nuclei v3.11.1** template scan (14k local templates): vulns, exposures, CVEs, tech/WAF detection |
 | `bb_target_analyse(target, subdomains, ports)` | One-shot quick recon report (DNS + HTTP + ports + subdomains) |
-| `bb_vendors(limit, page)` | **补天项目大厅**: dedicated-SRC vendor list — name, bounty range (RMB), recommend flag, update time |
+| `bb_vendors(kind, limit, page, name)` | **补天项目大厅**: `kind=welfare` (公益SRC 厂商库, ~2000 家注册厂商, name 可搜"大学/医院"等) 或 `kind=dedicated` (专属SRC, ~46 家带奖金范围). welfare 的 cid 用于提交 `/Loo/submit?cid=X` |
 | `bb_activities(status, limit, with_details)` | **补天活动中心**: ongoing/ended activities with full rules text (join → extra rewards) |
 | `bb_report(title, url, vtype, level, detail, fix, ...)` | **补天报告生成器**: Markdown draft in the official template format — POST 三处 rule, POC code block, screenshot checklist, self-check warnings |
 
@@ -63,15 +63,20 @@ as authorized.
 The user's money path is Butian (butian.net). Full loop:
 
 1. **Pick the battlefield** (do this first if no target is given):
-   - `bb_vendors(limit=50)` → list of dedicated-SRC vendors with bounty ranges.
-     Prefer vendors with high `max_reward` + `[推荐]` + recent `update time`.
+   - **公益SRC** (default, no pre-approval): `bb_vendors(kind="welfare", name="大学"/"医院"/"征信")`
+     → search the ~2000 registered 公益 vendors. 选靶标准: gov/edu/医疗/征信优先
+     (**gov/edu 无权重要求**); 独立域名 > 省级统一门户; 避开 `kb/butian-plan.md`
+     不关注名单(JeeCms/泛微OA/正方教务等); 厂商漏洞页(厂商详情页)活跃度高的优先
+     (确认快=回款快)。
+   - **专属SRC** (bounty): `bb_vendors(kind="dedicated")` → ~46 vendors with explicit
+     bounty ranges. Prefer high `max_reward` + `[推荐]` + recent update.
    - `bb_activities(status="ongoing")` → live campaigns (报名 in the browser, then
      check the name when submitting — extra reward on top of the vuln bounty).
    - Cross-check against `kb/butian-plan.md`: skip vendors/vuln types in the
      「不关注的系统和漏洞」 list; IP vulns not accepted; same system+type ≤ 3.
-2. **Get the scope**: a vendor's test scope (domain/IP) is on the vendor's
-   项目详情 page (browser) — record it, then treat those hosts as the authorized
-   scope for Section 0.
+2. **Get the scope**: for a 公益 vendor the scope is the vendor's public website
+   (find the official domain via Baidu — that search result doubles as 归属证明).
+   Enumerate real subsystems from the homepage's own links (not just the apex).
 3. **Hunt**: run the recon ladder (step 2–7 below) against the in-scope hosts.
 4. **Verify + draft**: for each confirmed finding call `bb_report(...)` to emit a
    Butian-compliant Markdown draft (it enforces the POST 三处 rule, POC code

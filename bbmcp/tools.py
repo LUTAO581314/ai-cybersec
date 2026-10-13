@@ -637,8 +637,12 @@ def nuclei_scan(
 BUTIAN_BASE = "https://www.butian.net"
 
 
-def _butian_json(path: str, payload: dict, referer: str, tries: int = 3) -> dict:
-    """POST to a butian XHR endpoint with session warm-up and polite retry."""
+def _butian_json(path: str, payload: dict, referer: str, tries: int = 3, form: bool = False) -> dict:
+    """POST to a butian XHR endpoint with session warm-up and polite retry.
+
+    `form=True` sends the payload as application/x-www-form-urlencoded (required
+    by /Reward/pub; JSON is ignored by its parser and always returns page 1).
+    """
     referer_url = referer if referer.startswith("http") else BUTIAN_BASE + referer
     last: dict = {}
     with httpx.Client(
@@ -657,7 +661,16 @@ def _butian_json(path: str, payload: dict, referer: str, tries: int = 3) -> dict
             pass
         for attempt in range(tries):
             try:
-                last = client.post(BUTIAN_BASE + path, json=payload).json()
+                if form:
+                    import urllib.parse
+                    resp = client.post(
+                        BUTIAN_BASE + path,
+                        content=urllib.parse.urlencode(payload),
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    )
+                else:
+                    resp = client.post(BUTIAN_BASE + path, json=payload)
+                last = resp.json()
             except Exception as e:
                 last = {"status": 0, "info": f"request failed: {e}"}
             if last.get("status") == 1:
@@ -668,36 +681,47 @@ def _butian_json(path: str, payload: dict, referer: str, tries: int = 3) -> dict
     return last
 
 
-def butian_vendors(limit: int = 50, page: int = 1) -> str:
-    """List Butian dedicated-SRC vendors (项目大厅): name, bounty range, status.
+def butian_vendors(kind: str = "welfare", limit: int = 30, page: int = 1, name: str = "") -> str:
+    """List Butian SRC vendors from the 项目大厅 page.
 
-    limit: page size 1-200 (default 50). page: page number (default 1).
-    Returns one line per vendor with company_id, name, reward range (RMB),
-    recommended flag and last update time.
+    kind: 'welfare' (公益SRC 厂商库, ~200 registered vendors, default) or
+          'dedicated' (专属SRC, ~46 vendors with bounty ranges).
+    limit: page size (welfare is server-capped at 30; dedicated 1-200).
+    page: page number (default 1).
+    name: vendor name search filter (welfare only), e.g. "大学".
+    Returns vendor id (cid for welfare — use in /Loo/submit?cid=X) + name.
     """
-    j = _butian_json("/Reward/corps", {"page": max(1, page), "size": max(1, min(limit, 200))}, "/Reward/plan/2")
+    if kind == "dedicated":
+        j = _butian_json("/Reward/corps", {"page": max(1, page), "size": max(1, min(limit, 200))}, "/Reward/plan/2")
+        if j.get("status") != 1:
+            return f"butian /Reward/corps failed: {j.get('info')} (status={j.get('status')})"
+        lst = (j.get("data") or {}).get("list") or []
+        if not lst:
+            return f"No dedicated vendors returned (page={page}). Try another page."
+        out = [f"但天项目大厅 专属SRC厂商  page={page} got={len(lst)}\n" + "-" * 60]
+        for v in lst:
+            reward = f"{v.get('min_reward','?')}~{v.get('max_reward','?')}元"
+            flag = " [推荐]" if str(v.get("recommend")) == "1" else ""
+            out.append(
+                f"- id={v.get('company_id')}  {v.get('company_name')}  奖金:{reward}{flag}"
+                f"  更新:{v.get('change_time','?')[:10]}"
+            )
+        out.append("\n下一步: 用 bb_target_analyse / bb_subdomains 对厂商范围内的域名开测; 提交时用 bb_report 生成补天格式报告。")
+        return "\n".join(out)
+
+    j = _butian_json("/Reward/pub", {"name": name or "", "p": max(1, page)}, "/Reward/plan/2", form=True)
     if j.get("status") != 1:
-        return f"butian /Reward/corps failed: {j.get('info')} (status={j.get('status')})"
-    data = j.get("data") or {}
-    lst = data.get("list") or []
+        return f"butian /Reward/pub failed: {j.get('info')} (status={j.get('status')})"
+    lst = (j.get("data") or {}).get("list") or []
     if not lst:
-        return f"No vendors returned (page={page}). Try another page."
-    out = [f"但天项目大厅 专属SRC厂商  page={page} got={len(lst)}\n" + "-" * 60]
+        return f"No welfare vendors returned (page={page}, name={name!r}). Try another page/keyword."
+    out = [f"但天项目大厅 公益SRC厂商库  page={page} got={len(lst)}  (cid 用于 /Loo/submit?cid= 提交)\n" + "-" * 60]
     for v in lst:
-        reward = f"{v.get('min_reward','?')}~{v.get('max_reward','?')}元"
-        flag = " [推荐]" if str(v.get("recommend")) == "1" else ""
-        out.append(
-            f"- id={v.get('company_id')}  {v.get('company_name')}  奖金:{reward}{flag}"
-            f"  更新:{v.get('change_time','?')[:10]}"
-        )
-    intro = [v for v in lst if v.get("introduce")]
-    if intro:
-        out.append("\n厂商简介(前3):")
-        for v in intro[:3]:
-            out.append(f"  {v.get('company_name')}: {str(v.get('introduce'))[:80]}")
+        out.append(f"- cid={v.get('company_id')}  {v.get('company_name')}")
     out.append(
-        "\n下一步: 用 bb_target_analyse / bb_subdomains 对厂商范围内的域名开测; "
-        "提交时用 bb_report 生成补天格式报告。"
+        "\n选靶标准: gov/edu/医疗/征信优先(无权重要求); 独立域名 > 省级统一门户; "
+        "避开 kb/butian-plan.md 不关注名单(JeeCms/泛微OA/正方教务等)。"
+        "厂商详情: /Company/<cid>; 提交: /Loo/submit?cid=<cid>"
     )
     return "\n".join(out)
 

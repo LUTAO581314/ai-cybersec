@@ -105,13 +105,17 @@ def bb_nuclei(
 
 
 @mcp.tool()
-def bb_vendors(limit: int = 50, page: int = 1) -> str:
-    """List Butian dedicated-SRC vendors (项目大厅): name, bounty range, recommend flag, update time.
+def bb_vendors(kind: str = "welfare", limit: int = 30, page: int = 1, name: str = "") -> str:
+    """List Butian SRC vendors from the 项目大厅 page.
 
-    limit: page size 1-200 (default 50). page: page number (default 1).
-    Use the returned company names/scopes to pick your main hunting grounds.
+    kind: 'welfare' (公益SRC 厂商库, ~200 registered vendors, default) or
+          'dedicated' (专属SRC, ~46 vendors with bounty ranges).
+    limit: page size (welfare is server-capped at 30; dedicated 1-200).
+    page: page number (default 1).
+    name: vendor name search filter (welfare only), e.g. "大学".
+    The welfare vendor cid is used for submission: /Loo/submit?cid=<cid>.
     """
-    return bb.butian_vendors(limit, page)
+    return bb.butian_vendors(kind, limit, page, name)
 
 
 @mcp.tool()

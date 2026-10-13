@@ -37,7 +37,7 @@
 | `bb_headers_check` | 安全头/CORS/Cookie/敏感文件(.git/.env/备份) |
 | `bb_nuclei` | **Nuclei 模板扫描**(14k 模板;tags/severity/线程/超时可控;结果落盘 loot/) |
 | `bb_target_analyse` | 一键侦察报告(DNS+HTTP+端口+子域) |
-| `bb_vendors` | **补天项目大厅**:专属SRC厂商列表(名称/奖金范围/推荐/更新时间) |
+| `bb_vendors` | **补天项目大厅**:`kind=welfare` 公益SRC厂商库(~2000家,可按"大学/医院"等关键词搜索) 或 `kind=dedicated` 专属SRC(~46家,含奖金范围) |
 | `bb_activities` | **补天活动中心**:进行中/已结束活动 + 完整活动规则文本 |
 | `bb_report` | **补天报告生成器**:按官方模板生成 Markdown 草稿(POST三处/POC代码块/权重校验/截图清单/自查提醒) |
 
