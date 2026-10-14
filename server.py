@@ -202,6 +202,7 @@ def bb_report(
     test_account: str = "",
     activity: str = "",
     summary: str = "",
+    repro: str = "",
     outdir: str = "",
 ) -> str:
     """Generate a Butian-compliant vulnerability submission report (Markdown, paste-ready).
@@ -221,6 +222,7 @@ def bb_report(
     test_account: test credentials if login required
     activity: activity/task name to check at submission
     summary: 简要描述 — 漏洞概述+影响, 一两句话, 不写详细URL (表单该栏必填)
+    repro: 小白复现手册 — 点击级步骤+每步预期现象+常见错误操作, 假设提交人是网安小白
     outdir: output dir (default <project>/reports)
     Returns the file path + a pre-submission warning list.
     """
@@ -228,7 +230,7 @@ def bb_report(
         title=title, url=url, vtype=vtype, level=level, detail=detail, fix=fix,
         method=method, post_data=post_data, param_name=param_name, poc=poc,
         vendor=vendor, scope=scope, weight=weight, test_account=test_account,
-        activity=activity, summary=summary, outdir=outdir,
+        activity=activity, summary=summary, repro=repro, outdir=outdir,
     )
 
 

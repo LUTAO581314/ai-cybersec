@@ -85,6 +85,15 @@ The user's money path is Butian (butian.net). Full loop:
 4. **Verify + draft**: for each confirmed finding call `bb_report(...)` to emit a
    Butian-compliant Markdown draft (it enforces the POST 三处 rule, POC code
    block, weight check, screenshot checklist). The file lands in `reports/`.
+   **Mandatory fields most runs forget:**
+   - `summary` (简要描述): 1-2 sentences, 概述+影响, **no detailed URL**.
+   - `repro` (小白复现手册): write it as if the submitter is a 网安小白 —
+     click-level browser steps, the **expected phenomenon after each step**,
+     and a "常见错误操作" table (wrong captcha / typo'd quote / missing
+     Preserve log...). If you can't write the manual, you haven't really
+     reproduced it yourself. The manual also doubles as the answer script
+     when the vendor asks questions.
+   - The 截图清单 (two required images + recipes) is generated automatically.
 5. **Human confirm, then submit**: per `kb/butian-role.md` — AI-found vulns must
    pass a human check of the POC screenshots before submission (repeated
    unverified AI vulns can freeze the account). First-come-first-served → submit

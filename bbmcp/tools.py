@@ -1132,6 +1132,7 @@ def butian_report(
     test_account: str = "",
     activity: str = "",
     summary: str = "",
+    repro: str = "",
     outdir: str = "",
 ) -> str:
     """Generate a Butian-compliant submission report draft (Markdown, paste-ready).
@@ -1176,9 +1177,18 @@ def butian_report(
     else:
         warn_summary = None
 
+    # 小白复现手册: 提交人(可能是网安小白)照着点就能复现并回答厂商质询
+    rp = repro.strip()
+    if not rp:
+        rp = ("（待补: 点击级复现手册 — 假设读者是网安小白: ①用浏览器做什么操作"
+              "②每步应看到什么现象 ③常见错误操作及修正。写不出来=自己还没真复现。）")
+
     warn: list[str] = []
     if warn_summary:
         warn.append(warn_summary)
+    if not repro.strip():
+        warn.append("小白复现手册未提供 — 必须写'点击级步骤+每步预期现象+常见错误操作', "
+                    "提交人是小白, 照手册点不出来就会被厂商质疑")
     if not url.strip().lower().startswith(("http://", "https://")):
         url = "https://" + url.strip()
         warn.append("URL 未带协议, 已自动补 https:// (请确认真实协议)")
@@ -1267,6 +1277,12 @@ def butian_report(
     L.append("")
     L.append("- [ ] ① 漏洞完整复现过程截图 (本地上传)")
     L.append("- [ ] ② 厂商归属证明截图 (本地上传)")
+    L.append("")
+    L.append("---")
+    L.append("")
+    L.append("## 小白复现手册 (提交人自己看: 照做就能复现+回答厂商质询, 不贴进表单)")
+    L.append("")
+    L.append(rp)
     L.append("")
     L.append("---")
     L.append("")
