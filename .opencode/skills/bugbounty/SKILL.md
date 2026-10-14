@@ -26,15 +26,19 @@ accounts, and scope boundaries (e.g. "no auth-endpoint fuzzing").
 | Tool | Purpose |
 |------|---------|
 | `bb_resolve(host)` | DNS records A/AAAA/CNAME/MX/NS/TXT |
-| `bb_subdomains(domain, use_wordlist)` | Subdomain discovery — Certificate Transparency (crt.sh) + inline DNS wordlist |
+| `bb_subdomains(domain, use_wordlist, verify)` | Subdomain discovery (crt.sh + DNS wordlist). **`verify=true`** probes each name and marks [live]/[dead] + flags "same page as X" catch-all twins — always use it on real targets |
 | `bb_port_scan(host, ports, timeout)` | Concurrent TCP port scan (common web/db ports by default) |
 | `bb_http_probe(targets)` | Batch HTTP probe: status / title / tech / size / redirects |
 | `bb_tech_detect(url)` | Web technology fingerprint (headers + body heuristics) |
-| `bb_dir_fuzz(base_url, extensions, wordlist)` | HTTP directory/endpoint brute force (light, rate-limited) |
-| `bb_headers_check(url)` | Passive check: security headers, CORS, cookies, sensitive files (.git, .env, backups) |
-| `bb_nuclei(target, templates, tags, severity, threads, timeout, extra_args)` | **Nuclei v3.11.1** template scan (14k local templates): vulns, exposures, CVEs, tech/WAF detection |
+| `bb_dir_fuzz(base_url, extensions, wordlist)` | HTTP directory/endpoint brute force (light, rate-limited). Auto-warns **CATCH-ALL** when most hits share status+size (SPA false positives) |
+| `bb_headers_check(url)` | Passive check: security headers, CORS, cookies, sensitive files (.git, .env, backups) — sensitive-file hits are similarity-checked against the homepage and flagged `⚠ likely FALSE` on SPAs |
+| `bb_site_map(url)` | **Mine a homepage for real subsystems** (grouped by host, assets skipped). On multi-department sites (universities/hospitals) this is the highest-value recon step — homepage links are the authoritative subsystem inventory (OA/教务/招生/人事/图书馆) |
+| `bb_nuclei(target, ..., background)` | **Nuclei v3.11.1** template scan (14k local templates). **Use `background=true`** for anything beyond a quick tag pass — full-lib scans take minutes and the MCP client times out on foreground waits |
+| `bb_nuclei_result(stem)` | Poll a background nuclei job: "STILL RUNNING + partial count" → final finding summary |
+| `bb_captcha_capture(url)` | Download a captcha image to `loot/` + return the session cookie for the next step |
+| `bb_login_attempt(url, cookie, data)` | ONE controlled login attempt; response body verbatim. Reports **DISCONNECT** (server drops TCP, no HTTP response) — that is itself a submittable finding |
 | `bb_target_analyse(target, subdomains, ports)` | One-shot quick recon report (DNS + HTTP + ports + subdomains) |
-| `bb_vendors(kind, limit, page, name)` | **补天项目大厅**: `kind=welfare` (公益SRC 厂商库, ~2000 家注册厂商, name 可搜"大学/医院"等) 或 `kind=dedicated` (专属SRC, ~46 家带奖金范围). welfare 的 cid 用于提交 `/Loo/submit?cid=X` |
+| `bb_vendors(kind, limit, page, name)` | **补天项目大厅**: `kind=welfare` (公益SRC 厂商库, 2000+ 家注册厂商, name 可搜"大学/医院"等) 或 `kind=dedicated` (专属SRC, ~46 家带奖金范围). welfare 的 cid 用于提交 `/Loo/submit?cid=X` |
 | `bb_activities(status, limit, with_details)` | **补天活动中心**: ongoing/ended activities with full rules text (join → extra rewards) |
 | `bb_report(title, url, vtype, level, detail, fix, ...)` | **补天报告生成器**: Markdown draft in the official template format — POST 三处 rule, POC code block, screenshot checklist, self-check warnings |
 
@@ -85,7 +89,12 @@ The user's money path is Butian (butian.net). Full loop:
    pass a human check of the POC screenshots before submission (repeated
    unverified AI vulns can freeze the account). First-come-first-served → submit
    fast once confirmed. Copy each section of the generated report into the
-   matching form field.
+   matching form field. The form's 简要描述 field is mandatory: 概述+影响, 不写
+   详细URL (bb_report's `summary` param); the 漏洞详情 must include BOTH proof
+   screenshots (复现过程 + 厂商归属) — the generated report's 截图清单 has the
+   step-by-step recipe for making each image.
+6. **Iterate**: run the post-run loop (§3e) — update skill/MCP/kb with what this
+   engagement taught, then commit + push the repo.
 
 ### 3b. Recon ladder (for a confirmed in-scope target)
 
@@ -96,27 +105,116 @@ The user's money path is Butian (butian.net). Full loop:
    - 测试行为遵守 `kb/butian-role.md`: 限速扫描、RCE 证明后立刻停(whoami 即可)、
      不拉数据、不跳板、不 DoS、不动业务数据、不留 webshell。
 2. **Quick recon**: `bb_target_analyse("target.com")` for an overview.
-3. **DNS & subdomains**: `bb_resolve`, then `bb_subdomains("target.com")`.
-   Optional deeper pass with the big SecLists wordlist by extending the server
-   or running the wordlist through `bb_dir_fuzz`-style enumeration manually.
-4. **Services**: `bb_port_scan("target.com", ports="80,443,8080,8443,3000,...")`.
-5. **HTTP layering**: `bb_http_probe` over discovered hosts, `bb_tech_detect` on
+3. **DNS & subdomains**: `bb_resolve`, then `bb_subdomains("target.com",
+   verify=true)` — the verify pass is what separates real subsystems from
+   wildcard/CGNAT noise (campus networks make every wordlist name "resolve" to
+   the same catch-all; verify shows which ones actually serve distinct pages).
+   If the apex resolves to a CGNAT IP (100.64.0.0/10 or 198.18.0.0/15), the apex
+   itself is usually broken — work on the live subdomains instead.
+4. **Map the real surface**: `bb_site_map("https://www.target.com")`. On
+   multi-department sites this beats subdomain guessing — the homepage links
+   are the inventory (and they double as 归属证明 material).
+5. **Services**: `bb_port_scan("target.com", ports="80,443,8080,8443,3000,...")`.
+6. **HTTP layering**: `bb_http_probe` over discovered hosts, `bb_tech_detect` on
    interesting ones, then `bb_dir_fuzz` on live web roots (use a SecLists
-   wordlist for real coverage).
-6. **Weakness triage**: `bb_headers_check` for header/CORS/cookie/sensitive-file
-   issues; correlate findings with PayloadsAllTheThings for exploit research.
-7. **Template scan**: `bb_nuclei(target)` for in-scope live targets — start with
-   a filter (`tags="exposures"`, `severity="medium"`) to keep runs short, then
-   widen. Nuclei sends more requests than the recon tools; keep `threads` low
-   (10-25) on production targets and avoid it during maintenance windows.
-8. **Report**: for each finding give: URL, how to reproduce, severity
-    (info/low/medium/high/critical) via `bb_headers_check` output and manual
-    analysis. Only report verified issues; honor program disclosure policy.
+   wordlist for real coverage). **Read the CATCH-ALL warning**: if most hits
+   share status+size (or all redirect to one login page), the app is a SPA/auth
+   filter and the "found" endpoints are false positives — verify any you care
+   about manually, and move on to its login page.
+7. **Weakness triage**: `bb_headers_check` for header/CORS/cookie/sensitive-file
+   issues (its sensitive-file hits are similarity-checked against the homepage —
+   trust the ⚠ flags); correlate findings with PayloadsAllTheThings for exploit research.
+8. **Template scan**: `bb_nuclei(target, background=true)` then poll with
+   `bb_nuclei_result` — see §3d for the tag strategy. Nuclei sends more requests
+   than the recon tools; keep `threads` low (10-25) on production targets.
+9. **Login-flow deep-dive**: §3c — on in-house systems this is where findings
+   actually come from.
+10. **Report**: for each finding give: URL, how to reproduce, severity
+     (info/low/medium/high/critical). Only report verified issues; honor program
+     disclosure policy.
     - **补天(Butian)提交**: 用 `bb_report(...)` 生成官方模板格式的 Markdown 草稿
       (自动处理 POST 三处/POC 代码块/权重校验/截图清单/自查提醒), 落盘在
       `reports/`。对照 `kb/butian-submission-template.md` 的「提交前自查清单」
       逐项确认后, 按节复制进表单提交。平台规则(审核时限、5个待审限制、
       重复按时间、信誉分)见 `kb/butian-faq.md`。先报先得 → 确认无误尽快提交。
+
+### 3c. Login-flow deep-dive (where the real findings come from)
+
+Template scanners find what templates know. **In-house systems (OA/教务/门户 —
+exactly what 公益SRC vendors run) yield to manual login-flow testing instead.**
+This playbook produced the 2026-10-14 finding (see §6).
+
+1. **Find the login endpoint.** `bb_site_map` on the portal → pick a subsystem
+   (OA/招生/教务). Fetch the login page; read the form: action URL, param names,
+   whether the password is hashed client-side (MD5/SHA in the login JS), and any
+   captcha endpoint (e.g. `/login/code.jsp`). Also grep the page/JS for sibling
+   endpoints (forget-password, QR login, SMS login) — each is an unauthenticated
+   surface.
+2. **Break the captcha with OCR.** `bb_captcha_capture(captcha_url)` → saves the
+   image + returns the session cookie. Run the `ocr` MCP tool on the saved path
+   (4-digit captchas are ~90% reliable; re-capture on a failed attempt).
+3. **Baseline with a clean attempt.** `bb_login_attempt(endpoint, cookie,
+   "user=admin&password=<wrong>&yzm=<ocr>")`. Learn the app's response grammar:
+   wrong-code vs wrong-password vs unknown-user messages. **Watch `leftCount` /
+   remaining-attempts fields — they leak per-username state (enumeration).**
+4. **Differential testing, one variable at a time.**
+   - Username only: `<name>'` → format error? → the quote reaches parsing.
+   - `user=x' or '1'='1` vs `user=x' or '1'='2` (TRUE vs FALSE).
+   - Repeat each payload 3-4× (rate limiting can mask the signal).
+   - **Interpret connection-level behavior, not just bodies:** no HTTP response at
+     all (DISCONNECT / connection reset) is a signal — a server that crashes on a
+     crafted param before responding is submittable on its own (medium risk:
+     unauthenticated crash / suspected SQL-handling flaw). Same result for TRUE
+     and FALSE + existing and non-existing users ⇒ crash sits in
+     parse/SQL-construction, not in the query itself.
+   - Budget matters: login forms count attempts per username. Use throwaway
+     usernames for crash testing; save real accounts for the final proof.
+5. **Verify impact & scope.** After a crash, re-GET the login page and a second
+   endpoint: if they still 200, it's per-request impact (honest, still
+   submittable); if the app is down, say so. Never leave the app worse off than
+   you found it.
+6. **Report.** `bb_report(...)` — title: `XX系统XX接口存在未授权异常崩溃(疑似SQL注入)`,
+   level 中危, method POST with the full packet in `post_data` and the injected
+   param in `param_name`, POC = the crashing value. Screenshot the crash in a
+   browser DevTools Network tab (red failed request) — that is the proof image.
+
+### 3d. Nuclei usage (don't fight the MCP timeout)
+
+- **Always `background=true` for full-lib or multi-tag scans**; poll with
+  `bb_nuclei_result(stem)` every 30-60s. Foreground + short timeout is only for
+  single quick tags.
+- A focused tag set beats the full lib on in-house stacks (fewer templates, less
+  noise, faster): `tags="sqli,xss,ssrf,auth-bypass,misconfig,exposures,cves,headless,default-login,lfi,rce"`
+  ≈ 5.4k templates ≈ 2 min/host. Full lib ≈ 5+ min and mostly misses bespoke OA.
+- Tag names are exact (`misconfig`, not `misconfiguration`; `exposures`, not `exposure`).
+  If a scan "finds 0 with 7 templates loaded", the tag filter silently matched
+  almost nothing — check the loaded template count in the result tail.
+- Nuclei results on in-house OA are usually info-level (cookie flags, banners).
+  Treat a quiet nuclei run as "no known CVEs", NOT as "clean" — then do §3c.
+
+### 3e. Post-run iteration loop (MANDATORY after every real engagement)
+
+After each 实战 (once the report is generated or the run is paused), iterate the
+toolchain itself and push it — this is how the skill and MCP stay current:
+
+1. **Capture lessons**: what slowed the run down? false positives? a manual step
+   that should have been a tool? a platform rule that was missing/wrong?
+2. **Iterate the skill** (both copies — global
+   `C:\Users\LT\.config\opencode\skills\bugbounty\SKILL.md` and project
+   `bugbounty-mcp\.opencode\skills\bugbounty\SKILL.md`, keep them identical):
+   playbook tweaks, new warnings, corrected platform rules.
+3. **Iterate the MCP** when a lesson is repeatable: add/change functions in
+   `bbmcp/tools.py`, register in `server.py`, smoke-test the touched paths
+   (compile + one real call), then re-run `smoke_test.py`.
+4. **Fix knowledge**: wrong/outdated facts go to `kb/` (platform rules, pricing,
+   vendor list). Refresh `kb/welfare-vendors-snapshot.json` when crawling new pages.
+5. **Ship it**: `git add -A`, commit with a message naming the lesson
+   (e.g. "实战XX大学: 报告补简要描述字段+双截图制作步骤"), `git push`
+   (LUTAO581314/ai-cybersec, main). If the network to GitHub is down, retry once;
+   if still down, note the commit is local and push at the next opportunity.
+
+The bar for adding a tool: it fixed a **recurring** pain (seen ≥1× in a run and
+obviously reusable), it is tested end-to-end, and the README tool table is updated.
 
 ## 4. Guardrails when driving the tools
 
@@ -147,3 +245,27 @@ TARGET: <target>  (authorized: <program/own> <scope>)
 [INFO] ...
 NEXT: <suggested follow-up, within scope>
 ```
+
+## 6. Case study: 江西师范大学 (2026-10-14, 公益SRC)
+
+First full loop run — the pattern to repeat.
+
+- **Pick**: `bb_vendors(kind="welfare", name="大学")` → 江西师范大学 (cid 65415).
+  Chosen because the vendor page showed an active pipeline (96 vulns, 22 已处理,
+  a 确认 within the last 12h — fast reviews). edu = no 补天权重 requirement.
+- **Recon**: apex on CGNAT (198.18.x) with broken https → subdomains with
+  verify=true + `bb_site_map` on www → 18 real subsystems (www=Dswjcms,
+  oa=legacy 贝凯 OA, oas/oa6=**new 贝凯 JSP OA**, jwc=ASP.NET 教务, yz/rsc/...).
+- **Nuclei** (5.4k focused tags): 2 info-level (cookie without Secure) — a
+  "quiet" run, i.e. no known CVEs; the OA is bespoke.
+- **Finding** (via §3c): `POST /oa6/doLogin.jsp` with `userId=x' or 'y'='z`
+  → server drops TCP with no HTTP response (4/4 repro, TRUE/FALSE identical,
+  existing + non-existing users). Single quote → format error (quote reaches
+  parsing). App healthy afterwards (per-request impact). Reported 中危 as
+  未授权异常崩溃 (疑似SQL注入) via `bb_report`; bonus observations (leftCount
+  per-username leak, client-side MD5 password, cookie flags) kept as low-risk
+  candidates.
+- **Lessons encoded in this skill**: CGNAT apex → trust verify=true + site_map;
+  SPA dir-fuzz → trust the catch-all warning; quiet nuclei → go manual on the
+  login; OCR loop works for 4-digit captchas; crash-without-response is the
+  finding.

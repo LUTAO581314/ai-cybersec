@@ -36,9 +36,15 @@ def bb_resolve(host: str) -> str:
 
 
 @mcp.tool()
-def bb_subdomains(domain: str, use_wordlist: bool = True) -> str:
-    """Enumerate subdomains via Certificate Transparency (crt.sh) and optional DNS brute force."""
-    return bb.subdomains(domain, bb.SUBDOMAIN_WORDLIST if use_wordlist else None)
+def bb_subdomains(domain: str, use_wordlist: bool = True, verify: bool = False) -> str:
+    """Enumerate subdomains via Certificate Transparency (crt.sh) and optional DNS brute force.
+
+    verify: additionally probe each name over HTTP and mark [live]/[dead], flagging
+    'same page as X' twins (wildcard/CGNAT catch-all — common on campus networks).
+    Use verify=True on real targets; it's the difference between 45 noise rows and
+    the ~20 real subsystems.
+    """
+    return bb.subdomains(domain, bb.SUBDOMAIN_WORDLIST if use_wordlist else None, verify=verify)
 
 
 @mcp.tool()
@@ -91,24 +97,73 @@ def bb_nuclei(
     threads: int = 25,
     timeout: float = 120.0,
     extra_args: str = "",
+    background: bool = False,
 ) -> str:
     """Run the Nuclei template scanner against an authorized target (light/rate-limited).
 
     templates: optional template file/dir (default: full local lib).
     tags: comma-separated nuclei tags (e.g. 'exposures,cves').
     severity: minimum severity (info/low/medium/high/critical).
-    threads: concurrency + rate limit (1-60). timeout: wall-clock seconds.
+    threads: concurrency + rate limit (1-60). timeout: wall-clock seconds (foreground only).
     extra_args: raw extra nuclei CLI args appended verbatim.
+    background: True => return a job handle immediately and poll with bb_nuclei_result.
+    Recommended for full-lib scans (they take minutes and the MCP client times out
+    waiting). For quick single-tag passes, foreground with a small timeout is fine.
     Full output is saved under loot/; only a summary is returned.
     """
-    return bb.nuclei_scan(target, templates, tags, severity, threads, timeout, extra_args)
+    return bb.nuclei_scan(target, templates, tags, severity, threads, timeout, extra_args, background)
+
+
+@mcp.tool()
+def bb_nuclei_result(stem: str) -> str:
+    """Check a background nuclei job (from bb_nuclei background=true).
+
+    Returns 'STILL RUNNING' + partial finding count, or the full finding summary
+    once the process exits. Poll every 30-60s.
+    """
+    return bb.nuclei_result(stem)
+
+
+@mcp.tool()
+def bb_site_map(url: str, max_links: int = 120) -> str:
+    """Mine a homepage/portal for real subsystems (grouped by host, assets skipped).
+
+    On multi-department sites (universities/hospitals) this is the single most
+    valuable recon step: homepage links are the authoritative inventory of live
+    subsystems (OA, 教务, 招生, 人事, 图书馆...) — far better than subdomain guesses.
+    """
+    return bb.site_map(url, max_links)
+
+
+@mcp.tool()
+def bb_captcha_capture(url: str) -> str:
+    """Download a captcha image to loot/ and return its session cookie.
+
+    url: the captcha image endpoint, e.g. https://oa.example.com/login/code.jsp?d=ts
+    Next: run the ocr MCP tool on the saved path, then call bb_login_attempt
+    with the returned cookie + the OCR'd code.
+    """
+    return bb.captcha_capture(url)
+
+
+@mcp.tool()
+def bb_login_attempt(url: str, cookie: str, data: str, method: str = "POST") -> str:
+    """Fire ONE controlled login attempt; returns the response body verbatim.
+
+    For differential testing (SQLi quotes, username enumeration). Connection-level
+    failures are reported as DISCONNECT — a server dropping TCP without any HTTP
+    response in response to a crafted param is itself a submittable finding.
+    url: login endpoint (e.g. /doLogin.jsp). cookie: from bb_captcha_capture.
+    data: raw form body (e.g. "userId=admin&password=xxx&yzm=1234").
+    """
+    return bb.login_attempt(url, cookie, data, method)
 
 
 @mcp.tool()
 def bb_vendors(kind: str = "welfare", limit: int = 30, page: int = 1, name: str = "") -> str:
     """List Butian SRC vendors from the 项目大厅 page.
 
-    kind: 'welfare' (公益SRC 厂商库, ~200 registered vendors, default) or
+    kind: 'welfare' (公益SRC 厂商库, 2000+ registered vendors, default) or
           'dedicated' (专属SRC, ~46 vendors with bounty ranges).
     limit: page size (welfare is server-capped at 30; dedicated 1-200).
     page: page number (default 1).
@@ -146,6 +201,7 @@ def bb_report(
     weight: str = "",
     test_account: str = "",
     activity: str = "",
+    summary: str = "",
     outdir: str = "",
 ) -> str:
     """Generate a Butian-compliant vulnerability submission report (Markdown, paste-ready).
@@ -164,6 +220,7 @@ def bb_report(
     weight: 补天权重 for 公益SRC (">=1" or "0") — wrong choice gets rejected
     test_account: test credentials if login required
     activity: activity/task name to check at submission
+    summary: 简要描述 — 漏洞概述+影响, 一两句话, 不写详细URL (表单该栏必填)
     outdir: output dir (default <project>/reports)
     Returns the file path + a pre-submission warning list.
     """
@@ -171,7 +228,7 @@ def bb_report(
         title=title, url=url, vtype=vtype, level=level, detail=detail, fix=fix,
         method=method, post_data=post_data, param_name=param_name, poc=poc,
         vendor=vendor, scope=scope, weight=weight, test_account=test_account,
-        activity=activity, outdir=outdir,
+        activity=activity, summary=summary, outdir=outdir,
     )
 
 
